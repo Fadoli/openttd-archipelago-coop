@@ -44,21 +44,22 @@ CommandCost CmdAPUnlockEngine(DoCommandFlags flags, const std::string &engine_na
 }
 
 /**
- * Boost a station's cargo rating to MAX (255).
- * This command is executed on the server and broadcasts to all clients.
+ * Boost all stations' cargo ratings for a company (Free Station Upgrade bonus).
+ * Sets all rated cargo to MAX_STATION_RATING for all player stations.
  * 
  * @param flags Command flags
- * @param station_id The station to boost
- * @param cargo_type The cargo type to boost (0-59)
- * @return The cost of the command (always 0, cannot fail)
+ * @param company_id The company whose stations to boost
+ * @return The cost of the command (always 0)
  */
-CommandCost CmdAPBoostStationRating(DoCommandFlags flags, StationID station_id, uint8_t cargo_type)
+CommandCost CmdAPBoostStationRating(DoCommandFlags flags, CompanyID company_id)
 {
 	if (flags & DC_EXEC) {
-		Station *st = Station::GetIfValid(station_id);
-		if (st != nullptr && cargo_type < NUM_CARGO) {
-			if (st->goods[cargo_type].HasRating()) {
-				st->goods[cargo_type].rating = MAX_STATION_RATING;
+		for (Station *st : Station::Iterate()) {
+			if (st->owner != company_id) continue;
+			for (CargoType ct = 0; ct < NUM_CARGO; ct++) {
+				if (st->goods[ct].HasRating()) {
+					st->goods[ct].rating = MAX_STATION_RATING;
+				}
 			}
 		}
 	}

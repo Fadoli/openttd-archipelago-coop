@@ -3696,23 +3696,12 @@ static void AP_OnItemReceived(const APItem &item)
 		AP_ShowNews("[AP] Bonus: Town Growth Boost! All towns growing faster.");
 	} else if (item.item_name == "Free Station Upgrade") {
 		/* Boost all player stations to MAX_STATION_RATING (255) for 30 game-days.
-		 * Use commands to ensure server-authoritative changes in multiplayer mode.
+		 * Use single command to ensure all stations are boosted synchronously server-side.
 		 * The per-day timer re-applies the boost so normal decay doesn't reduce it. */
 		_ap_station_boost_ticks = 2400; /* 30 days * ~80 ticks/day */
-		for (Station *st : Station::Iterate()) {
-			if (st->owner != cid) continue;
-			for (CargoType ct = 0; ct < NUM_CARGO; ct++) {
-				if (st->goods[ct].HasRating()) {
-					/* Send command to ensure this is synchronized in multiplayer.
-					 * In single-player, the command executes immediately on the server.
-					 * In multiplayer, the command is queued on the server and propagated
-					 * to all clients through the normal network sync. */
-					Command<CMD_AP_BOOST_STATION_RATING>::Do(
-						DoCommandFlags{DoCommandFlag::Execute},
-						st->index, ct);
-				}
-			}
-		}
+		Command<CMD_AP_BOOST_STATION_RATING>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			cid);
 		AP_ShowNews("[AP] Bonus: Free Station Upgrade! All your stations boosted to perfect rating for 30 days!");
 	} else if (item.item_name == "Cash Bonus" || item.item_name == "Extra Funding") {
 		/* Legacy names - use command for money changes */

@@ -24,11 +24,11 @@ CommandCost CmdAPUnlockEngine(DoCommandFlags flags, const std::string &engine_na
 /**
  * Boost a station's cargo rating for a specific cargo type.
  * This is called from AP_OnItemReceived when processing "Free Station Upgrade" items.
+ * Boosts ALL stations owned by the company.
  * @param flags Command flags
- * @param station_id The station to boost
- * @param cargo_type The cargo type to boost
+ * @param company_id The company whose stations to boost
  */
-CommandCost CmdAPBoostStationRating(DoCommandFlags flags, StationID station_id, uint8_t cargo_type);
+CommandCost CmdAPBoostStationRating(DoCommandFlags flags, CompanyID company_id);
 
 /**
  * Unlock infrastructure (tracks, roads, signals, bridges, tunnels, airports, etc.).
