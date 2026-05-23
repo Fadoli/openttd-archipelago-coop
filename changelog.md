@@ -1,5 +1,11 @@
 # Changelog — OpenTTD Archipelago
 
+## Fadoli
+
+### Fixed
+
+- [mp] fix desync
+
 ## [exp-5.0] — 2026-03-17
 
 ### Fixed
