@@ -1521,17 +1521,8 @@ static void AP_UnlockIHWagonBatch()
  *   - Toolbar invalidation
  * ---------------------------------------------------------------------- */
 
-bool AP_UnlockEngineByName(const std::string &name)
+static bool AP_ResolveEngineByName(const std::string &name, std::string *resolved_name, EngineID *engine_id)
 {
-	CompanyID cid = _local_company;
-	/* Bridge mode: dedicated server has _local_company == COMPANY_SPECTATOR.
-	 * Use Company 0 (first player's company) as the target for CMD_ENGINE_CTRL.
-	 * If Company 0 doesn't exist yet, we still proceed — the company_avail bit
-	 * and _ap_unlocked_engine_ids entry are set so the engine is available when
-	 * a company IS created. */
-	if (_ap_bridge_mode) cid = CompanyID(0);
-	if (cid >= MAX_COMPANIES) return false;
-
 	if (!_ap_engine_map_built) BuildEngineMap();
 
 	/* Alias map: old/wrong AP item names → correct OpenTTD 15.2 engine string names.
@@ -1738,12 +1729,37 @@ bool AP_UnlockEngineByName(const std::string &name)
 		return false;
 	}
 
-	Engine *e = Engine::GetIfValid(it->second);
+	if (resolved_name != nullptr) *resolved_name = resolved;
+	if (engine_id != nullptr) *engine_id = it->second;
+	return true;
+}
+
+bool AP_CanUnlockEngineByName(const std::string &name)
+{
+	return AP_ResolveEngineByName(name, nullptr, nullptr);
+}
+
+bool AP_UnlockEngineByName(const std::string &name)
+{
+	CompanyID cid = _local_company;
+	/* Bridge mode: dedicated server has _local_company == COMPANY_SPECTATOR.
+	 * Use Company 0 (first player's company) as the target for CMD_ENGINE_CTRL.
+	 * If Company 0 doesn't exist yet, we still proceed — the company_avail bit
+	 * and _ap_unlocked_engine_ids entry are set so the engine is available when
+	 * a company IS created. */
+	if (_ap_bridge_mode) cid = CompanyID(0);
+	if (cid >= MAX_COMPANIES) return false;
+
+	std::string resolved;
+	EngineID engine_id;
+	if (!AP_ResolveEngineByName(name, &resolved, &engine_id)) return false;
+
+	Engine *e = Engine::GetIfValid(engine_id);
 	if (e == nullptr) return false;
 
 	/* Track that AP has explicitly unlocked this engine — the periodic
 	 * re-lock sweep will not re-lock engines present in this set. */
-	_ap_unlocked_engine_ids.insert(it->second);
+	_ap_unlocked_engine_ids.insert(engine_id);
 
 	/* Set EngineFlag::Available so the engine appears in the build-vehicle list.
 	 * EnableEngineForCompany() only sets company_avail, but the build-vehicle
@@ -1756,7 +1772,7 @@ bool AP_UnlockEngineByName(const std::string &name)
 	 * explicitly chose them — they MUST work. */
 	if (!e->info.climates.Test(_settings_game.game_creation.landscape)) {
 		e->info.climates.Set(_settings_game.game_creation.landscape);
-		AP_TRACE(fmt::format("ForceClimate: eid={} landscape={}", (int)it->second.base(), (int)_settings_game.game_creation.landscape));
+		AP_TRACE(fmt::format("ForceClimate: eid={} landscape={}", (int)engine_id.base(), (int)_settings_game.game_creation.landscape));
 	}
 	if (_ap_bridge_mode) {
 		/* Bridge mode: unlock for ALL companies.
@@ -1766,7 +1782,7 @@ bool AP_UnlockEngineByName(const std::string &name)
 		for (const Company *co : Company::Iterate()) {
 			CompanyID old = _current_company;
 			_current_company = OWNER_DEITY;
-			Command<CMD_ENGINE_CTRL>::Post(it->second, co->index, true);
+			Command<CMD_ENGINE_CTRL>::Post(engine_id, co->index, true);
 			_current_company = old;
 		}
 	} else {
@@ -1774,9 +1790,9 @@ bool AP_UnlockEngineByName(const std::string &name)
 		CompanyID old = _current_company;
 		_current_company = OWNER_DEITY;
 		CommandCost res = Command<CMD_ENGINE_CTRL>::Do(DoCommandFlags{DoCommandFlag::Execute},
-			it->second, cid, true);
+			engine_id, cid, true);
 		_current_company = old;
-		int eid_val = (int)it->second.base();
+		int eid_val = (int)engine_id.base();
 		int cid_val = (int)cid.base();
 		const char *res_str = res.Succeeded() ? "OK" : "FAIL";
 		int avail_val = e->company_avail.Test(cid) ? 1 : 0;
@@ -1826,7 +1842,7 @@ bool AP_UnlockEngineByName(const std::string &name)
 	 * unlocks are enabled, auto-unlock a proportional batch of IH wagons.
 	 * The "IH: " prefix is still present in the original item name. */
 	if (name.size() > 4 && name.substr(0, 4) == "IH: " && _ap_ih_wagon_unlocks) {
-		if (!_ap_ih_wagons_built) AP_BuildIHWagonQueue(it->second);
+		if (!_ap_ih_wagons_built) AP_BuildIHWagonQueue(engine_id);
 		AP_UnlockIHWagonBatch();
 	}
 
@@ -3306,8 +3322,8 @@ bool               _ap_pending_world_start         = false;
 static bool        _ap_goal_sent                   = false;
 static bool        _ap_session_started             = false; ///< True once we've done first-tick setup in GM_NORMAL
 static int         _ap_breakdown_wave_ticks        = 0;     ///< >0 while breakdown wave is active (~60 seconds)
-static int         _ap_fuel_shortage_ticks         = 0;     ///< >0 while fuel shortage slowdown is active
-static int         _ap_cargo_bonus_ticks           = 0;     ///< >0 while 2x cargo payment is active (240 ticks = 60s)
+int                _ap_fuel_shortage_ticks         = 0;     ///< >0 while fuel shortage slowdown is active
+int                _ap_cargo_bonus_ticks           = 0;     ///< >0 while 2x cargo payment is active (240 ticks = 60s)
 static int         _ap_reliability_boost_ticks     = 0;     ///< >0 while reliability boost active (90 game-days)
 static int         _ap_station_boost_ticks         = 0;     ///< >0 while station rating boost active (30 game-days)
 static int         _ap_license_revoke_ticks        = 0;     ///< >0 while license revoke trap is active
@@ -3487,22 +3503,14 @@ static void AP_OnItemReceived(const APItem &item)
 
 	/* Vehicle unlock — ALWAYS re-apply, even on replay (idempotent).
 	 * This ensures vehicles are restored after save/load reconnect.
-	 * Use command to ensure server-authoritative unlocks in multiplayer. */
-	if (AP_UnlockEngineByName(item.item_name)) {
+	 * Resolve and execute through the command so multiplayer stays server-authoritative. */
+	if (Command<CMD_AP_UNLOCK_ENGINE>::Do(DoCommandFlags{DoCommandFlag::Execute}, item.item_name).Succeeded()) {
 		if (!is_replay) {
 			AP_TRACE(fmt::format("VehicleUnlock: '{}' (NEW)", item.item_name));
-			/* Also send command to ensure this is synchronized in multiplayer */
-			Command<CMD_AP_UNLOCK_ENGINE>::Do(
-				DoCommandFlags{DoCommandFlag::Execute},
-				item.item_name);
 			AP_ShowNews("[AP] Unlocked: " + item.item_name);
 		} else {
 			AP_TRACE(fmt::format("VehicleUnlock: '{}' (REPLAY re-apply)", item.item_name));
 			Debug(misc, 1, "[AP] Re-applied vehicle unlock on reconnect: '{}'", item.item_name);
-			/* Re-apply via command to ensure it's set on the server */
-			Command<CMD_AP_UNLOCK_ENGINE>::Do(
-				DoCommandFlags{DoCommandFlag::Execute},
-				item.item_name);
 		}
 		return;
 	}

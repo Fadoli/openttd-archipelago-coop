@@ -12,8 +12,14 @@
 
 #include "command_type.h"
 #include "station_type.h"
+#include "industry_type.h"
+#include "town_type.h"
+#include "vehicle_type.h"
+#include "company_type.h"
+#include "engine_type.h"
 
 /**
+
  * Unlock an engine by its in-game name (server-authoritative).
  * This is called from AP_OnItemReceived and broadcasts the unlock to all clients.
  * @param flags Command flags
@@ -22,6 +28,7 @@
 CommandCost CmdAPUnlockEngine(DoCommandFlags flags, const std::string &engine_name);
 
 /**
+
  * Boost a station's cargo rating for a specific cargo type.
  * This is called from AP_OnItemReceived when processing "Free Station Upgrade" items.
  * Boosts ALL stations owned by the company.

@@ -11,36 +11,35 @@
 #include "archipelago_cmd.h"
 #include "archipelago.h"
 #include "company_func.h"
+#include "company_base.h"
 #include "command_func.h"
 #include "engine_base.h"
 #include "station_base.h"
 #include "economy_func.h"
 #include "vehicle_func.h"
+#include "vehicle_base.h"
+#include "town.h"
+#include "industry.h"
+#include "window_func.h"
 
+extern bool AP_CanUnlockEngineByName(const std::string &name);
 extern bool AP_UnlockEngineByName(const std::string &name);
 
 /**
  * Unlock an engine by its name - server-authoritative.
  * This command is executed on the server and broadcasts to all clients.
- * 
+ *
  * @param flags Command flags
  * @param engine_name The name of the engine to unlock
- * @return The cost of the command (always 0, cannot fail)
+ * @return The cost of the command
  */
 CommandCost CmdAPUnlockEngine(DoCommandFlags flags, const std::string &engine_name)
 {
-	if (flags & DC_EXEC) {
-		/* The actual unlock logic is in AP_UnlockEngineByName which handles:
-		 * - Looking up the engine by name (with alias translation)
-		 * - Enabling it for the company
-		 * - Updating vehicle build and autoreplace windows
-		 * 
-		 * Since this is a server command executed in network mode, it will
-		 * automatically propagate to all clients when executed on the server. */
-		AP_UnlockEngineByName(engine_name);
+	if (!flags.Test(DoCommandFlag::Execute)) {
+		return AP_CanUnlockEngineByName(engine_name) ? CommandCost() : CMD_ERROR;
 	}
-	
-	return CommandCost();
+
+	return AP_UnlockEngineByName(engine_name) ? CommandCost() : CMD_ERROR;
 }
 
 /**
@@ -53,7 +52,7 @@ CommandCost CmdAPUnlockEngine(DoCommandFlags flags, const std::string &engine_na
  */
 CommandCost CmdAPBoostStationRating(DoCommandFlags flags, CompanyID company_id)
 {
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		for (Station *st : Station::Iterate()) {
 			if (st->owner != company_id) continue;
 			for (CargoType ct = 0; ct < NUM_CARGO; ct++) {
@@ -90,7 +89,7 @@ CommandCost CmdAPUnlockInfrastructure(DoCommandFlags flags, uint8_t infrastructu
 	 * If issues arise in multiplayer where clients disagree on what's unlocked,
 	 * we can add server-side state here. */
 	
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		// Placeholder for future server-side infrastructure state tracking
 	}
 	
@@ -113,7 +112,7 @@ CommandCost CmdAPChangeCompanyMoney(DoCommandFlags flags, Money amount)
 	Company *c = Company::GetIfValid(cid);
 	if (c == nullptr) return CommandCost();
 	
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		/* Directly modify the company's money.
 		 * In network mode, this is executed on the server and propagated to clients.
 		 * 
@@ -144,7 +143,7 @@ CommandCost CmdAPChangeCompanyLoan(DoCommandFlags flags, Money amount)
 	Company *c = Company::GetIfValid(cid);
 	if (c == nullptr) return CommandCost();
 	
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		/* Directly modify the company's loan.
 		 * In network mode, this is executed on the server and propagated to clients. */
 		c->current_loan = std::max(Money(0), c->current_loan + amount);
@@ -166,7 +165,7 @@ CommandCost CmdAPChangeCompanyLoan(DoCommandFlags flags, Money amount)
  */
 CommandCost CmdAPSetFastforwardSpeed(DoCommandFlags flags, uint16_t speed_limit)
 {
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		// Currently this is handled in AP_OnItemReceived directly
 		// This command exists for future expansion
 	}
@@ -184,7 +183,7 @@ CommandCost CmdAPSetFastforwardSpeed(DoCommandFlags flags, uint16_t speed_limit)
  */
 CommandCost CmdAPBoostVehicleReliability(DoCommandFlags flags, CompanyID company_id)
 {
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		for (Vehicle *v : Vehicle::Iterate()) {
 			if (v->owner == company_id && v->IsPrimaryVehicle()) {
 				const Engine *e = v->GetEngine();
@@ -209,7 +208,7 @@ CommandCost CmdAPBoostVehicleReliability(DoCommandFlags flags, CompanyID company
  */
 CommandCost CmdAPApplyBreakdown(DoCommandFlags flags, CompanyID company_id)
 {
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		for (Vehicle *v : Vehicle::Iterate()) {
 			if (v->owner == company_id && v->IsPrimaryVehicle()) {
 				v->breakdown_chance = 255;
@@ -231,7 +230,7 @@ CommandCost CmdAPApplyBreakdown(DoCommandFlags flags, CompanyID company_id)
  */
 CommandCost CmdAPApplySignalFailure(DoCommandFlags flags, CompanyID company_id)
 {
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		for (Vehicle *v : Vehicle::Iterate()) {
 			if (v->owner == company_id && v->IsPrimaryVehicle() && v->type == VEH_TRAIN) {
 				// ctr=2 is the "about to break down" trigger state
@@ -256,7 +255,7 @@ CommandCost CmdAPApplySignalFailure(DoCommandFlags flags, CompanyID company_id)
  */
 CommandCost CmdAPTriggerTownGrowth(DoCommandFlags flags, uint32_t unused)
 {
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		for (Town *t : Town::Iterate()) {
 			t->grow_counter = 0;
 		}
@@ -275,7 +274,7 @@ CommandCost CmdAPTriggerTownGrowth(DoCommandFlags flags, uint32_t unused)
  */
 CommandCost CmdAPCloseIndustry(DoCommandFlags flags, IndustryID industry_id)
 {
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		Industry *ind = Industry::GetIfValid(industry_id);
 		if (ind != nullptr) {
 			for (auto &produced : ind->produced) {
@@ -298,7 +297,7 @@ CommandCost CmdAPCloseIndustry(DoCommandFlags flags, IndustryID industry_id)
  */
 CommandCost CmdAPRevokeLicense(DoCommandFlags flags, uint8_t vehicle_type)
 {
-	if (flags & DC_EXEC) {
+	if (flags.Test(DoCommandFlag::Execute)) {
 		CompanyID cid = _local_company;
 		if (cid < MAX_COMPANIES) {
 			for (Engine *e : Engine::Iterate()) {
@@ -322,8 +321,7 @@ CommandCost CmdAPRevokeLicense(DoCommandFlags flags, uint8_t vehicle_type)
  */
 CommandCost CmdAPStartCargoBonus(DoCommandFlags flags, uint16_t duration_ticks)
 {
-	if (flags & DC_EXEC) {
-		extern int _ap_cargo_bonus_ticks;
+	if (flags.Test(DoCommandFlag::Execute)) {
 		_ap_cargo_bonus_ticks = duration_ticks;
 	}
 	
@@ -340,8 +338,7 @@ CommandCost CmdAPStartCargoBonus(DoCommandFlags flags, uint16_t duration_ticks)
  */
 CommandCost CmdAPStartFuelShortage(DoCommandFlags flags, uint16_t duration_ticks)
 {
-	if (flags & DC_EXEC) {
-		extern int _ap_fuel_shortage_ticks;
+	if (flags.Test(DoCommandFlag::Execute)) {
 		_ap_fuel_shortage_ticks = duration_ticks;
 	}
 	

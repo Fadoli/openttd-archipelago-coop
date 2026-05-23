@@ -375,7 +375,7 @@ enum Commands : uint8_t {
 	CMD_UPDATE_LEAGUE_TABLE_ELEMENT_SCORE, ///< update the score of a league table element
 	CMD_REMOVE_LEAGUE_TABLE_ELEMENT,       ///< remove a league table element
 
-	CMD_AP_UNLOCK_ENGINE,            ///< archipelago: unlock an engine by name (server-authoritative)
+	CMD_AP_UNLOCK_ENGINE,            ///< archipelago: unlock engine by AP item name
 	CMD_AP_BOOST_STATION_RATING,     ///< archipelago: boost station cargo rating
 	CMD_AP_UNLOCK_INFRASTRUCTURE,    ///< archipelago: unlock infrastructure (tracks, signals, etc.)
 	CMD_AP_CHANGE_COMPANY_MONEY,     ///< archipelago: change company money

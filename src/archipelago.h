@@ -26,6 +26,9 @@
 
 struct Vehicle; ///< Forward declaration for AP_OnVehicleCreated
 
+extern int _ap_fuel_shortage_ticks;
+extern int _ap_cargo_bonus_ticks;
+
 /** Connection states for the Archipelago client. */
 enum class APState : uint8_t {
 	DISCONNECTED,
@@ -457,6 +460,9 @@ void ShowArchipelagoIndexWindow();
 
 /** Returns true if the given EngineID has been unlocked via Archipelago items. */
 bool AP_IsEngineUnlocked(uint32_t engine_id);
+
+/** Returns true when the AP item name resolves to a vehicle unlock. */
+bool AP_CanUnlockEngineByName(const std::string &name);
 
 /** Unlock an engine by its AP item name.  Used by both singleplayer AP and bridge mode. */
 bool AP_UnlockEngineByName(const std::string &name);
