@@ -24,6 +24,7 @@
 #include <charconv>
 #include "archipelago.h"
 #include "archipelago_gui.h"
+#include "archipelago_cmd.h"
 #include "base_media_graphics.h"
 #include "base_media_sounds.h"
 #include "base_media_music.h"
@@ -3485,14 +3486,23 @@ static void AP_OnItemReceived(const APItem &item)
 	}
 
 	/* Vehicle unlock — ALWAYS re-apply, even on replay (idempotent).
-	 * This ensures vehicles are restored after save/load reconnect. */
+	 * This ensures vehicles are restored after save/load reconnect.
+	 * Use command to ensure server-authoritative unlocks in multiplayer. */
 	if (AP_UnlockEngineByName(item.item_name)) {
 		if (!is_replay) {
 			AP_TRACE(fmt::format("VehicleUnlock: '{}' (NEW)", item.item_name));
+			/* Also send command to ensure this is synchronized in multiplayer */
+			Command<CMD_AP_UNLOCK_ENGINE>::Do(
+				DoCommandFlags{DoCommandFlag::Execute},
+				item.item_name);
 			AP_ShowNews("[AP] Unlocked: " + item.item_name);
 		} else {
 			AP_TRACE(fmt::format("VehicleUnlock: '{}' (REPLAY re-apply)", item.item_name));
 			Debug(misc, 1, "[AP] Re-applied vehicle unlock on reconnect: '{}'", item.item_name);
+			/* Re-apply via command to ensure it's set on the server */
+			Command<CMD_AP_UNLOCK_ENGINE>::Do(
+				DoCommandFlags{DoCommandFlag::Execute},
+				item.item_name);
 		}
 		return;
 	}
@@ -3515,24 +3525,26 @@ static void AP_OnItemReceived(const APItem &item)
 	if (item.item_name == "Breakdown Wave") {
 		/* 60-second breakdown timer (240 ticks × 250 ms).
 		 * While active, the per-tick handler keeps reliability at 1.
-		 * When it expires, vehicles are restored to normal reliability. */
+		 * When it expires, vehicles are restored to normal reliability.
+		 * Use command to ensure all clients apply the breakdown simultaneously. */
 		_ap_breakdown_wave_ticks = 240;
-		for (Vehicle *v : Vehicle::Iterate()) {
-			if (v->owner == cid && v->IsPrimaryVehicle()) {
-				v->breakdown_chance = 255;
-				v->reliability = 1;
-			}
-		}
+		Command<CMD_AP_APPLY_BREAKDOWN>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			cid);
 		AP_ShowNews("[AP] TRAP: Breakdown Wave! All vehicles unreliable for 60 seconds!");
 	} else if (item.item_name == "Recession") {
 		if (c->money >= 0) {
 			/* Player has positive cash: halve it */
-			AP_ChangeMoney(cid, -(c->money / 2));
+			Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+				DoCommandFlags{DoCommandFlag::Execute},
+				-(c->money / 2));
 			AP_ShowNews("[AP] TRAP: Recession! Money halved.");
 		} else {
 			/* Player already in debt: add 25% of max_loan as extra debt */
 			Money penalty = (Money)((int64_t)_ap_pending_sd.max_loan / 4);
-			AP_ChangeMoney(cid, -penalty);
+			Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+				DoCommandFlags{DoCommandFlag::Execute},
+				-penalty);
 			AP_ShowNews(fmt::format("[AP] TRAP: Recession! Extra debt: {}.", AP_Money(penalty)));
 		}
 	} else if (item.item_name == "Maintenance Surge") {
@@ -3552,30 +3564,23 @@ static void AP_OnItemReceived(const APItem &item)
 		                           forced_loan * 2); /* cap at 2× max_loan */
 		AP_ShowNews(fmt::format("[AP] TRAP: Bank Loan Forced! +{}", AP_Money(forced_loan)));
 	} else if (item.item_name == "Signal Failure") {
-		for (Vehicle *v : Vehicle::Iterate()) {
-			if (v->owner == cid && v->IsPrimaryVehicle() && v->type == VEH_TRAIN) {
-				/* ctr=2 is the "about to break down" trigger state — this
-				 * stops the train and plays the breakdown sound.
-				 * ctr=1 is "already counting down" which has no visible effect. */
-				if (v->breakdown_ctr == 0) {
-					v->breakdown_ctr   = 2;
-					v->breakdown_delay = 255;
-				}
-			}
-		}
+		/* Use command to ensure signal failure is applied uniformly across all clients. */
+		Command<CMD_AP_APPLY_SIGNAL_FAILURE>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			cid);
 		AP_ShowNews("[AP] TRAP: Signal Failure! Trains are breaking down!");
 	} else if (item.item_name == "Fuel Shortage") {
 		/* Set a 60-second slowdown counter (240 ticks × 250 ms).
-		 * The realtime timer applies the speed cap every 5 s while active. */
-		_ap_fuel_shortage_ticks = 240;
-		for (Vehicle *v : Vehicle::Iterate()) {
-			if (v->owner == cid && v->IsPrimaryVehicle())
-				v->cur_speed = v->cur_speed / 2;
-		}
+		 * The timer applies the speed cap every tick while active.
+		 * Use command to synchronize timer start across all clients. */
+		Command<CMD_AP_START_FUEL_SHORTAGE>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			240);
 		AP_ShowNews("[AP] TRAP: Fuel Shortage! Vehicles running at half speed for 60 seconds!");
 	} else if (item.item_name == "Industry Closure") {
 		/* Find industries actively serviced by the player (same logic as Death Link).
-		 * Falls back to a random industry if none are connected yet. */
+		 * Falls back to a random industry if none are connected yet.
+		 * Use command to ensure industry closure is synchronized. */
 		std::vector<Industry *> active_industries;
 		for (Station *st : Station::Iterate()) {
 			if (st->owner != cid) continue;
@@ -3610,10 +3615,10 @@ static void AP_OnItemReceived(const APItem &item)
 		}
 
 		if (victim != nullptr) {
-			for (auto &produced : victim->produced) {
-				produced.history[THIS_MONTH].production = 0;
-			}
-			victim->prod_level = 0;
+			/* Use command to ensure industry closure is synchronized across all clients. */
+			Command<CMD_AP_CLOSE_INDUSTRY>::Do(
+				DoCommandFlags{DoCommandFlag::Execute},
+				victim->index);
 			const Town *t = victim->town;
 			std::string loc = (t != nullptr) ? std::string(" near ") + t->name : "";
 			AP_ShowNews(fmt::format("[AP] TRAP: Industry Closure! An industry{} has shut down!", loc));
@@ -3632,25 +3637,29 @@ static void AP_OnItemReceived(const APItem &item)
 		_ap_license_revoke_ticks = 3240 + (int)InteractiveRandomRange(3240); /* 1–2 years realtime */
 		int years_approx = (_ap_license_revoke_ticks / 3240) + 1;
 
-		/* Immediately hide all engines of this category for the local company */
-		for (Engine *e : Engine::Iterate()) {
-			if ((int)e->type != _ap_license_revoke_type) continue;
-			e->company_hidden.Set(cid);
-		}
-		MarkWholeScreenDirty();
+		/* Use command to ensure license revoke is synchronized across all clients. */
+		Command<CMD_AP_REVOKE_LICENSE>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			(uint8_t)idx);
 		AP_TRACE(fmt::format("TRAP LicenseRevoke: type={} ({}) ticks={} ~{} years", _ap_license_revoke_type, type_names[idx], _ap_license_revoke_ticks, years_approx));
 		AP_ShowNews(fmt::format("[AP] TRAP: Vehicle License Revoke! {} suspended for ~{} in-game year(s)!",
 		    type_names[idx], years_approx));
 
 	/* ── UTILITY ITEMS ─────────────────────────────────── */
 	} else if (item.item_name == "Cash Injection £50,000") {
-		AP_ChangeMoney(cid, (Money)50000LL);
+		Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			(Money)50000LL);
 		AP_ShowNews(fmt::format("[AP] Bonus: +{}!", AP_Money((Money)50000LL)));
 	} else if (item.item_name == "Cash Injection £200,000") {
-		AP_ChangeMoney(cid, (Money)200000LL);
+		Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			(Money)200000LL);
 		AP_ShowNews(fmt::format("[AP] Bonus: +{}!", AP_Money((Money)200000LL)));
 	} else if (item.item_name == "Cash Injection £500,000") {
-		AP_ChangeMoney(cid, (Money)500000LL);
+		Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			(Money)500000LL);
 		AP_ShowNews(fmt::format("[AP] Bonus: +{}!", AP_Money((Money)500000LL)));
 	} else if (item.item_name == "Loan Reduction £100,000") {
 		Money reduce = (Money)100000LL;
@@ -3659,47 +3668,57 @@ static void AP_OnItemReceived(const APItem &item)
 	} else if (item.item_name == "Reliability Boost (all vehicles, 90 days)") {
 		/* Start a 90-game-day reliability timer (90 days * ~80 ticks/day ≈ 7200 ticks).
 		 * The per-tick handler re-applies max reliability every tick, countering the
-		 * normal reliability_spd_dec decay that CheckVehicleBreakdown applies. */
+		 * normal reliability_spd_dec decay that CheckVehicleBreakdown applies.
+		 * Use command to ensure reliability boost is synchronized. */
 		_ap_reliability_boost_ticks = 7200;
-		for (Vehicle *v : Vehicle::Iterate()) {
-			if (v->owner == cid && v->IsPrimaryVehicle()) {
-				const Engine *e = v->GetEngine();
-				if (e != nullptr) v->reliability = e->reliability_max;
-				v->breakdown_chance = 0;
-			}
-		}
+		Command<CMD_AP_BOOST_VEHICLE_RELIABILITY>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			cid);
 		AP_ShowNews("[AP] Bonus: Reliability Boost! All vehicles at max reliability for 90 days.");
 	} else if (item.item_name == "Cargo Bonus (2x payment, 60 days)") {
 		/* Start a 60-second (240-tick) cargo payment multiplier.
-		 * The hook in DeliverGoods (economy.cpp) doubles profit while this is active. */
-		_ap_cargo_bonus_ticks = 240;
+		 * The hook in DeliverGoods (economy.cpp) doubles profit while this is active.
+		 * Use command to ensure cargo bonus timer is synchronized. */
+		Command<CMD_AP_START_CARGO_BONUS>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			240);
 		AP_ShowNews("[AP] Bonus: Cargo Bonus! All cargo deliveries pay double for 60 seconds!");
 	} else if (item.item_name == "Town Growth Boost") {
 		/* Trigger an immediate growth pulse in every town by resetting
 		 * grow_counter to 0.  The engine will schedule the next growth
 		 * tick immediately.  We deliberately do NOT halve growth_rate —
 		 * that mutation is permanent and, with 8+ copies in the pool,
-		 * would eventually freeze all towns. */
-		for (Town *t : Town::Iterate()) {
-			t->grow_counter = 0;
-		}
+		 * would eventually freeze all towns.
+		 * Use command to ensure all towns grow simultaneously. */
+		Command<CMD_AP_TRIGGER_TOWN_GROWTH>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			0);
 		AP_ShowNews("[AP] Bonus: Town Growth Boost! All towns growing faster.");
 	} else if (item.item_name == "Free Station Upgrade") {
 		/* Boost all player stations to MAX_STATION_RATING (255) for 30 game-days.
+		 * Use commands to ensure server-authoritative changes in multiplayer mode.
 		 * The per-day timer re-applies the boost so normal decay doesn't reduce it. */
 		_ap_station_boost_ticks = 2400; /* 30 days * ~80 ticks/day */
 		for (Station *st : Station::Iterate()) {
 			if (st->owner != cid) continue;
 			for (CargoType ct = 0; ct < NUM_CARGO; ct++) {
 				if (st->goods[ct].HasRating()) {
-					st->goods[ct].rating = MAX_STATION_RATING;
+					/* Send command to ensure this is synchronized in multiplayer.
+					 * In single-player, the command executes immediately on the server.
+					 * In multiplayer, the command is queued on the server and propagated
+					 * to all clients through the normal network sync. */
+					Command<CMD_AP_BOOST_STATION_RATING>::Do(
+						DoCommandFlags{DoCommandFlag::Execute},
+						st->index, ct);
 				}
 			}
 		}
 		AP_ShowNews("[AP] Bonus: Free Station Upgrade! All your stations boosted to perfect rating for 30 days!");
 	} else if (item.item_name == "Cash Bonus" || item.item_name == "Extra Funding") {
-		/* Legacy names */
-		AP_ChangeMoney(cid, (Money)100000LL);
+		/* Legacy names - use command for money changes */
+		Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			(Money)100000LL);
 		AP_ShowNews(fmt::format("[AP] Bonus: +{}!", AP_Money((Money)100000LL)));
 
 	/* ── Speed Boost (non-idempotent: cumulative +10 per item) ────── */

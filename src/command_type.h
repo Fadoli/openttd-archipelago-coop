@@ -375,6 +375,20 @@ enum Commands : uint8_t {
 	CMD_UPDATE_LEAGUE_TABLE_ELEMENT_SCORE, ///< update the score of a league table element
 	CMD_REMOVE_LEAGUE_TABLE_ELEMENT,       ///< remove a league table element
 
+	CMD_AP_UNLOCK_ENGINE,            ///< archipelago: unlock an engine by name (server-authoritative)
+	CMD_AP_BOOST_STATION_RATING,     ///< archipelago: boost station cargo rating
+	CMD_AP_UNLOCK_INFRASTRUCTURE,    ///< archipelago: unlock infrastructure (tracks, signals, etc.)
+	CMD_AP_CHANGE_COMPANY_MONEY,     ///< archipelago: change company money
+	CMD_AP_SET_FASTFORWARD_SPEED,    ///< archipelago: set fast-forward speed limit
+	CMD_AP_BOOST_VEHICLE_RELIABILITY,///< archipelago: boost vehicle reliability (trap/bonus)
+	CMD_AP_APPLY_BREAKDOWN,          ///< archipelago: apply breakdown to vehicles (trap)
+	CMD_AP_APPLY_SIGNAL_FAILURE,     ///< archipelago: apply signal failure to trains (trap)
+	CMD_AP_TRIGGER_TOWN_GROWTH,      ///< archipelago: trigger immediate town growth
+	CMD_AP_CLOSE_INDUSTRY,           ///< archipelago: close industry production (trap)
+	CMD_AP_REVOKE_LICENSE,           ///< archipelago: revoke vehicle type license (trap)
+	CMD_AP_START_CARGO_BONUS,        ///< archipelago: start cargo payment bonus timer
+	CMD_AP_START_FUEL_SHORTAGE,      ///< archipelago: start fuel shortage timer (trap)
+
 	CMD_END,                          ///< Must ALWAYS be on the end of this list!! (period)
 };
 

@@ -247,6 +247,8 @@ add_files(
     archipelago_gui.cpp
     archipelago_gui.h
     archipelago_manager.cpp
+    archipelago_cmd.cpp
+    archipelago_cmd.h
     intro_gui.cpp
     landscape.cpp
     landscape.h
