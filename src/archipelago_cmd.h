@@ -48,6 +48,14 @@ CommandCost CmdAPUnlockInfrastructure(DoCommandFlags flags, uint8_t infrastructu
 CommandCost CmdAPChangeCompanyMoney(DoCommandFlags flags, Money amount);
 
 /**
+ * Change company loan amount (for Maintenance Surge, Bank Loan Forced traps).
+ * This is called from AP_OnItemReceived for loan-related items.
+ * @param flags Command flags
+ * @param amount Loan amount to add/subtract
+ */
+CommandCost CmdAPChangeCompanyLoan(DoCommandFlags flags, Money amount);
+
+/**
  * Set fast-forward speed limit (for Speed Boost items).
  * This is called from AP_OnItemReceived when processing speed boost items.
  * @param flags Command flags
@@ -117,6 +125,7 @@ DEF_CMD_TRAIT(CMD_AP_UNLOCK_ENGINE,            CmdAPUnlockEngine,            Com
 DEF_CMD_TRAIT(CMD_AP_BOOST_STATION_RATING,    CmdAPBoostStationRating,      CommandFlag::Deity, CommandType::OtherManagement)
 DEF_CMD_TRAIT(CMD_AP_UNLOCK_INFRASTRUCTURE,   CmdAPUnlockInfrastructure,    CommandFlag::Deity, CommandType::OtherManagement)
 DEF_CMD_TRAIT(CMD_AP_CHANGE_COMPANY_MONEY,    CmdAPChangeCompanyMoney,      CommandFlag::Deity, CommandType::MoneyManagement)
+DEF_CMD_TRAIT(CMD_AP_CHANGE_COMPANY_LOAN,     CmdAPChangeCompanyLoan,       CommandFlag::Deity, CommandType::MoneyManagement)
 DEF_CMD_TRAIT(CMD_AP_SET_FASTFORWARD_SPEED,   CmdAPSetFastforwardSpeed,     CommandFlag::Deity, CommandType::OtherManagement)
 DEF_CMD_TRAIT(CMD_AP_BOOST_VEHICLE_RELIABILITY, CmdAPBoostVehicleReliability, CommandFlag::Deity, CommandType::OtherManagement)
 DEF_CMD_TRAIT(CMD_AP_APPLY_BREAKDOWN,         CmdAPApplyBreakdown,          CommandFlag::Deity, CommandType::OtherManagement)

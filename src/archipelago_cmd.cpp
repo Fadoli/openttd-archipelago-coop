@@ -129,6 +129,34 @@ CommandCost CmdAPChangeCompanyMoney(DoCommandFlags flags, Money amount)
 }
 
 /**
+ * Change company loan amount (for Maintenance Surge, Bank Loan Forced traps).
+ * This command is executed on the server to ensure synchronized loan changes.
+ * 
+ * @param flags Command flags
+ * @param amount Loan amount to add (positive to increase debt, negative to reduce)
+ * @return The cost of the command
+ */
+CommandCost CmdAPChangeCompanyLoan(DoCommandFlags flags, Money amount)
+{
+	CompanyID cid = _current_company;
+	if (cid >= MAX_COMPANIES) return CommandCost();
+	
+	Company *c = Company::GetIfValid(cid);
+	if (c == nullptr) return CommandCost();
+	
+	if (flags & DC_EXEC) {
+		/* Directly modify the company's loan.
+		 * In network mode, this is executed on the server and propagated to clients. */
+		c->current_loan = std::max(Money(0), c->current_loan + amount);
+		
+		/* Update company statistics for bankruptcy/wealth tracking */
+		InvalidateWindowClassesData(WC_FINANCES);
+	}
+	
+	return CommandCost();
+}
+
+/**
  * Set the fast-forward speed limit.
  * This command updates client-side settings that are not replicated.
  * 

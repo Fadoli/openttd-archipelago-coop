@@ -379,6 +379,7 @@ enum Commands : uint8_t {
 	CMD_AP_BOOST_STATION_RATING,     ///< archipelago: boost station cargo rating
 	CMD_AP_UNLOCK_INFRASTRUCTURE,    ///< archipelago: unlock infrastructure (tracks, signals, etc.)
 	CMD_AP_CHANGE_COMPANY_MONEY,     ///< archipelago: change company money
+	CMD_AP_CHANGE_COMPANY_LOAN,      ///< archipelago: change company loan amount
 	CMD_AP_SET_FASTFORWARD_SPEED,    ///< archipelago: set fast-forward speed limit
 	CMD_AP_BOOST_VEHICLE_RELIABILITY,///< archipelago: boost vehicle reliability (trap/bonus)
 	CMD_AP_APPLY_BREAKDOWN,          ///< archipelago: apply breakdown to vehicles (trap)

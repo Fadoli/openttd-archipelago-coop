@@ -3549,19 +3549,33 @@ static void AP_OnItemReceived(const APItem &item)
 		}
 	} else if (item.item_name == "Maintenance Surge") {
 		/* Add a moderate fixed loan increment, capped at max_loan from slot_data
-		 * so it stays proportional to the session's economy settings. */
+		 * so it stays proportional to the session's economy settings.
+		 * Use command to ensure synchronized loan change. */
 		Money loan_cap = (Money)std::max((int64_t)_ap_pending_sd.max_loan,
 		                                 (int64_t)300000LL);
-		Money new_l = c->current_loan + (Money)(loan_cap / 4); /* +25% of max_loan */
-		c->current_loan = std::min(new_l, loan_cap);
+		Money increase = (Money)(loan_cap / 4); /* +25% of max_loan */
+		/* Cap the total loan, but let the command handler deal with the actual increase */
+		if (c->current_loan + increase > loan_cap) {
+			increase = loan_cap - c->current_loan;
+		}
+		Command<CMD_AP_CHANGE_COMPANY_LOAN>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			increase);
 		AP_ShowNews("[AP] TRAP: Maintenance Surge! Emergency costs added to your loan.");
 	} else if (item.item_name == "Bank Loan Forced") {
 		/* Scale loan to the session's configured max_loan rather than a
-		 * hardcoded 500 M that would be impossible to repay early-game. */
+		 * hardcoded 500 M that would be impossible to repay early-game.
+		 * Use command to ensure synchronized loan change. */
 		Money forced_loan = (Money)_ap_pending_sd.max_loan;
 		if (forced_loan <= 0) forced_loan = (Money)300000LL; /* sane fallback */
-		c->current_loan = std::min(c->current_loan + forced_loan,
-		                           forced_loan * 2); /* cap at 2× max_loan */
+		Money new_loan = c->current_loan + forced_loan;
+		Money max_cap = forced_loan * 2; /* cap at 2× max_loan */
+		if (new_loan > max_cap) {
+			forced_loan = max_cap - c->current_loan;
+		}
+		Command<CMD_AP_CHANGE_COMPANY_LOAN>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			forced_loan);
 		AP_ShowNews(fmt::format("[AP] TRAP: Bank Loan Forced! +{}", AP_Money(forced_loan)));
 	} else if (item.item_name == "Signal Failure") {
 		/* Use command to ensure signal failure is applied uniformly across all clients. */
@@ -3662,8 +3676,12 @@ static void AP_OnItemReceived(const APItem &item)
 			(Money)500000LL);
 		AP_ShowNews(fmt::format("[AP] Bonus: +{}!", AP_Money((Money)500000LL)));
 	} else if (item.item_name == "Loan Reduction £100,000") {
+		/* Use command to ensure synchronized loan reduction. */
 		Money reduce = (Money)100000LL;
-		c->current_loan = (c->current_loan > reduce) ? Money(c->current_loan - reduce) : Money(0);
+		if (reduce > c->current_loan) reduce = c->current_loan;
+		Command<CMD_AP_CHANGE_COMPANY_LOAN>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			-reduce);
 		AP_ShowNews(fmt::format("[AP] Bonus: Loan reduced by {}!", AP_Money(reduce)));
 	} else if (item.item_name == "Reliability Boost (all vehicles, 90 days)") {
 		/* Start a 90-game-day reliability timer (90 days * ~80 ticks/day ≈ 7200 ticks).
