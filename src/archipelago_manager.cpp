@@ -24,6 +24,7 @@
 #include <charconv>
 #include "archipelago.h"
 #include "archipelago_gui.h"
+#include "archipelago_cmd.h"
 #include "base_media_graphics.h"
 #include "base_media_sounds.h"
 #include "base_media_music.h"
@@ -1520,17 +1521,8 @@ static void AP_UnlockIHWagonBatch()
  *   - Toolbar invalidation
  * ---------------------------------------------------------------------- */
 
-bool AP_UnlockEngineByName(const std::string &name)
+static bool AP_ResolveEngineByName(const std::string &name, std::string *resolved_name, EngineID *engine_id)
 {
-	CompanyID cid = _local_company;
-	/* Bridge mode: dedicated server has _local_company == COMPANY_SPECTATOR.
-	 * Use Company 0 (first player's company) as the target for CMD_ENGINE_CTRL.
-	 * If Company 0 doesn't exist yet, we still proceed — the company_avail bit
-	 * and _ap_unlocked_engine_ids entry are set so the engine is available when
-	 * a company IS created. */
-	if (_ap_bridge_mode) cid = CompanyID(0);
-	if (cid >= MAX_COMPANIES) return false;
-
 	if (!_ap_engine_map_built) BuildEngineMap();
 
 	/* Alias map: old/wrong AP item names → correct OpenTTD 15.2 engine string names.
@@ -1737,12 +1729,37 @@ bool AP_UnlockEngineByName(const std::string &name)
 		return false;
 	}
 
-	Engine *e = Engine::GetIfValid(it->second);
+	if (resolved_name != nullptr) *resolved_name = resolved;
+	if (engine_id != nullptr) *engine_id = it->second;
+	return true;
+}
+
+bool AP_CanUnlockEngineByName(const std::string &name)
+{
+	return AP_ResolveEngineByName(name, nullptr, nullptr);
+}
+
+bool AP_UnlockEngineByName(const std::string &name)
+{
+	CompanyID cid = _local_company;
+	/* Bridge mode: dedicated server has _local_company == COMPANY_SPECTATOR.
+	 * Use Company 0 (first player's company) as the target for CMD_ENGINE_CTRL.
+	 * If Company 0 doesn't exist yet, we still proceed — the company_avail bit
+	 * and _ap_unlocked_engine_ids entry are set so the engine is available when
+	 * a company IS created. */
+	if (_ap_bridge_mode) cid = CompanyID(0);
+	if (cid >= MAX_COMPANIES) return false;
+
+	std::string resolved;
+	EngineID engine_id;
+	if (!AP_ResolveEngineByName(name, &resolved, &engine_id)) return false;
+
+	Engine *e = Engine::GetIfValid(engine_id);
 	if (e == nullptr) return false;
 
 	/* Track that AP has explicitly unlocked this engine — the periodic
 	 * re-lock sweep will not re-lock engines present in this set. */
-	_ap_unlocked_engine_ids.insert(it->second);
+	_ap_unlocked_engine_ids.insert(engine_id);
 
 	/* Set EngineFlag::Available so the engine appears in the build-vehicle list.
 	 * EnableEngineForCompany() only sets company_avail, but the build-vehicle
@@ -1755,7 +1772,7 @@ bool AP_UnlockEngineByName(const std::string &name)
 	 * explicitly chose them — they MUST work. */
 	if (!e->info.climates.Test(_settings_game.game_creation.landscape)) {
 		e->info.climates.Set(_settings_game.game_creation.landscape);
-		AP_TRACE(fmt::format("ForceClimate: eid={} landscape={}", (int)it->second.base(), (int)_settings_game.game_creation.landscape));
+		AP_TRACE(fmt::format("ForceClimate: eid={} landscape={}", (int)engine_id.base(), (int)_settings_game.game_creation.landscape));
 	}
 	if (_ap_bridge_mode) {
 		/* Bridge mode: unlock for ALL companies.
@@ -1765,7 +1782,7 @@ bool AP_UnlockEngineByName(const std::string &name)
 		for (const Company *co : Company::Iterate()) {
 			CompanyID old = _current_company;
 			_current_company = OWNER_DEITY;
-			Command<CMD_ENGINE_CTRL>::Post(it->second, co->index, true);
+			Command<CMD_ENGINE_CTRL>::Post(engine_id, co->index, true);
 			_current_company = old;
 		}
 	} else {
@@ -1773,9 +1790,9 @@ bool AP_UnlockEngineByName(const std::string &name)
 		CompanyID old = _current_company;
 		_current_company = OWNER_DEITY;
 		CommandCost res = Command<CMD_ENGINE_CTRL>::Do(DoCommandFlags{DoCommandFlag::Execute},
-			it->second, cid, true);
+			engine_id, cid, true);
 		_current_company = old;
-		int eid_val = (int)it->second.base();
+		int eid_val = (int)engine_id.base();
 		int cid_val = (int)cid.base();
 		const char *res_str = res.Succeeded() ? "OK" : "FAIL";
 		int avail_val = e->company_avail.Test(cid) ? 1 : 0;
@@ -1825,7 +1842,7 @@ bool AP_UnlockEngineByName(const std::string &name)
 	 * unlocks are enabled, auto-unlock a proportional batch of IH wagons.
 	 * The "IH: " prefix is still present in the original item name. */
 	if (name.size() > 4 && name.substr(0, 4) == "IH: " && _ap_ih_wagon_unlocks) {
-		if (!_ap_ih_wagons_built) AP_BuildIHWagonQueue(it->second);
+		if (!_ap_ih_wagons_built) AP_BuildIHWagonQueue(engine_id);
 		AP_UnlockIHWagonBatch();
 	}
 
@@ -3305,8 +3322,8 @@ bool               _ap_pending_world_start         = false;
 static bool        _ap_goal_sent                   = false;
 static bool        _ap_session_started             = false; ///< True once we've done first-tick setup in GM_NORMAL
 static int         _ap_breakdown_wave_ticks        = 0;     ///< >0 while breakdown wave is active (~60 seconds)
-static int         _ap_fuel_shortage_ticks         = 0;     ///< >0 while fuel shortage slowdown is active
-static int         _ap_cargo_bonus_ticks           = 0;     ///< >0 while 2x cargo payment is active (240 ticks = 60s)
+int                _ap_fuel_shortage_ticks         = 0;     ///< >0 while fuel shortage slowdown is active
+int                _ap_cargo_bonus_ticks           = 0;     ///< >0 while 2x cargo payment is active (240 ticks = 60s)
 static int         _ap_reliability_boost_ticks     = 0;     ///< >0 while reliability boost active (90 game-days)
 static int         _ap_station_boost_ticks         = 0;     ///< >0 while station rating boost active (30 game-days)
 static int         _ap_license_revoke_ticks        = 0;     ///< >0 while license revoke trap is active
@@ -3485,8 +3502,9 @@ static void AP_OnItemReceived(const APItem &item)
 	}
 
 	/* Vehicle unlock — ALWAYS re-apply, even on replay (idempotent).
-	 * This ensures vehicles are restored after save/load reconnect. */
-	if (AP_UnlockEngineByName(item.item_name)) {
+	 * This ensures vehicles are restored after save/load reconnect.
+	 * Resolve and execute through the command so multiplayer stays server-authoritative. */
+	if (Command<CMD_AP_UNLOCK_ENGINE>::Do(DoCommandFlags{DoCommandFlag::Execute}, item.item_name).Succeeded()) {
 		if (!is_replay) {
 			AP_TRACE(fmt::format("VehicleUnlock: '{}' (NEW)", item.item_name));
 			AP_ShowNews("[AP] Unlocked: " + item.item_name);
@@ -3515,67 +3533,76 @@ static void AP_OnItemReceived(const APItem &item)
 	if (item.item_name == "Breakdown Wave") {
 		/* 60-second breakdown timer (240 ticks × 250 ms).
 		 * While active, the per-tick handler keeps reliability at 1.
-		 * When it expires, vehicles are restored to normal reliability. */
+		 * When it expires, vehicles are restored to normal reliability.
+		 * Use command to ensure all clients apply the breakdown simultaneously. */
 		_ap_breakdown_wave_ticks = 240;
-		for (Vehicle *v : Vehicle::Iterate()) {
-			if (v->owner == cid && v->IsPrimaryVehicle()) {
-				v->breakdown_chance = 255;
-				v->reliability = 1;
-			}
-		}
+		Command<CMD_AP_APPLY_BREAKDOWN>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			cid);
 		AP_ShowNews("[AP] TRAP: Breakdown Wave! All vehicles unreliable for 60 seconds!");
 	} else if (item.item_name == "Recession") {
 		if (c->money >= 0) {
 			/* Player has positive cash: halve it */
-			AP_ChangeMoney(cid, -(c->money / 2));
+			Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+				DoCommandFlags{DoCommandFlag::Execute},
+				-(c->money / 2));
 			AP_ShowNews("[AP] TRAP: Recession! Money halved.");
 		} else {
 			/* Player already in debt: add 25% of max_loan as extra debt */
 			Money penalty = (Money)((int64_t)_ap_pending_sd.max_loan / 4);
-			AP_ChangeMoney(cid, -penalty);
+			Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+				DoCommandFlags{DoCommandFlag::Execute},
+				-penalty);
 			AP_ShowNews(fmt::format("[AP] TRAP: Recession! Extra debt: {}.", AP_Money(penalty)));
 		}
 	} else if (item.item_name == "Maintenance Surge") {
 		/* Add a moderate fixed loan increment, capped at max_loan from slot_data
-		 * so it stays proportional to the session's economy settings. */
+		 * so it stays proportional to the session's economy settings.
+		 * Use command to ensure synchronized loan change. */
 		Money loan_cap = (Money)std::max((int64_t)_ap_pending_sd.max_loan,
 		                                 (int64_t)300000LL);
-		Money new_l = c->current_loan + (Money)(loan_cap / 4); /* +25% of max_loan */
-		c->current_loan = std::min(new_l, loan_cap);
+		Money increase = (Money)(loan_cap / 4); /* +25% of max_loan */
+		/* Cap the total loan, but let the command handler deal with the actual increase */
+		if (c->current_loan + increase > loan_cap) {
+			increase = loan_cap - c->current_loan;
+		}
+		Command<CMD_AP_CHANGE_COMPANY_LOAN>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			increase);
 		AP_ShowNews("[AP] TRAP: Maintenance Surge! Emergency costs added to your loan.");
 	} else if (item.item_name == "Bank Loan Forced") {
 		/* Scale loan to the session's configured max_loan rather than a
-		 * hardcoded 500 M that would be impossible to repay early-game. */
+		 * hardcoded 500 M that would be impossible to repay early-game.
+		 * Use command to ensure synchronized loan change. */
 		Money forced_loan = (Money)_ap_pending_sd.max_loan;
 		if (forced_loan <= 0) forced_loan = (Money)300000LL; /* sane fallback */
-		c->current_loan = std::min(c->current_loan + forced_loan,
-		                           forced_loan * 2); /* cap at 2× max_loan */
+		Money new_loan = c->current_loan + forced_loan;
+		Money max_cap = forced_loan * 2; /* cap at 2× max_loan */
+		if (new_loan > max_cap) {
+			forced_loan = max_cap - c->current_loan;
+		}
+		Command<CMD_AP_CHANGE_COMPANY_LOAN>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			forced_loan);
 		AP_ShowNews(fmt::format("[AP] TRAP: Bank Loan Forced! +{}", AP_Money(forced_loan)));
 	} else if (item.item_name == "Signal Failure") {
-		for (Vehicle *v : Vehicle::Iterate()) {
-			if (v->owner == cid && v->IsPrimaryVehicle() && v->type == VEH_TRAIN) {
-				/* ctr=2 is the "about to break down" trigger state — this
-				 * stops the train and plays the breakdown sound.
-				 * ctr=1 is "already counting down" which has no visible effect. */
-				if (v->breakdown_ctr == 0) {
-					v->breakdown_ctr   = 2;
-					v->breakdown_delay = 255;
-				}
-			}
-		}
+		/* Use command to ensure signal failure is applied uniformly across all clients. */
+		Command<CMD_AP_APPLY_SIGNAL_FAILURE>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			cid);
 		AP_ShowNews("[AP] TRAP: Signal Failure! Trains are breaking down!");
 	} else if (item.item_name == "Fuel Shortage") {
 		/* Set a 60-second slowdown counter (240 ticks × 250 ms).
-		 * The realtime timer applies the speed cap every 5 s while active. */
-		_ap_fuel_shortage_ticks = 240;
-		for (Vehicle *v : Vehicle::Iterate()) {
-			if (v->owner == cid && v->IsPrimaryVehicle())
-				v->cur_speed = v->cur_speed / 2;
-		}
+		 * The timer applies the speed cap every tick while active.
+		 * Use command to synchronize timer start across all clients. */
+		Command<CMD_AP_START_FUEL_SHORTAGE>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			240);
 		AP_ShowNews("[AP] TRAP: Fuel Shortage! Vehicles running at half speed for 60 seconds!");
 	} else if (item.item_name == "Industry Closure") {
 		/* Find industries actively serviced by the player (same logic as Death Link).
-		 * Falls back to a random industry if none are connected yet. */
+		 * Falls back to a random industry if none are connected yet.
+		 * Use command to ensure industry closure is synchronized. */
 		std::vector<Industry *> active_industries;
 		for (Station *st : Station::Iterate()) {
 			if (st->owner != cid) continue;
@@ -3610,10 +3637,10 @@ static void AP_OnItemReceived(const APItem &item)
 		}
 
 		if (victim != nullptr) {
-			for (auto &produced : victim->produced) {
-				produced.history[THIS_MONTH].production = 0;
-			}
-			victim->prod_level = 0;
+			/* Use command to ensure industry closure is synchronized across all clients. */
+			Command<CMD_AP_CLOSE_INDUSTRY>::Do(
+				DoCommandFlags{DoCommandFlag::Execute},
+				victim->index);
 			const Town *t = victim->town;
 			std::string loc = (t != nullptr) ? std::string(" near ") + t->name : "";
 			AP_ShowNews(fmt::format("[AP] TRAP: Industry Closure! An industry{} has shut down!", loc));
@@ -3632,74 +3659,81 @@ static void AP_OnItemReceived(const APItem &item)
 		_ap_license_revoke_ticks = 3240 + (int)InteractiveRandomRange(3240); /* 1–2 years realtime */
 		int years_approx = (_ap_license_revoke_ticks / 3240) + 1;
 
-		/* Immediately hide all engines of this category for the local company */
-		for (Engine *e : Engine::Iterate()) {
-			if ((int)e->type != _ap_license_revoke_type) continue;
-			e->company_hidden.Set(cid);
-		}
-		MarkWholeScreenDirty();
+		/* Use command to ensure license revoke is synchronized across all clients. */
+		Command<CMD_AP_REVOKE_LICENSE>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			(uint8_t)idx);
 		AP_TRACE(fmt::format("TRAP LicenseRevoke: type={} ({}) ticks={} ~{} years", _ap_license_revoke_type, type_names[idx], _ap_license_revoke_ticks, years_approx));
 		AP_ShowNews(fmt::format("[AP] TRAP: Vehicle License Revoke! {} suspended for ~{} in-game year(s)!",
 		    type_names[idx], years_approx));
 
 	/* ── UTILITY ITEMS ─────────────────────────────────── */
 	} else if (item.item_name == "Cash Injection £50,000") {
-		AP_ChangeMoney(cid, (Money)50000LL);
+		Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			(Money)50000LL);
 		AP_ShowNews(fmt::format("[AP] Bonus: +{}!", AP_Money((Money)50000LL)));
 	} else if (item.item_name == "Cash Injection £200,000") {
-		AP_ChangeMoney(cid, (Money)200000LL);
+		Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			(Money)200000LL);
 		AP_ShowNews(fmt::format("[AP] Bonus: +{}!", AP_Money((Money)200000LL)));
 	} else if (item.item_name == "Cash Injection £500,000") {
-		AP_ChangeMoney(cid, (Money)500000LL);
+		Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			(Money)500000LL);
 		AP_ShowNews(fmt::format("[AP] Bonus: +{}!", AP_Money((Money)500000LL)));
 	} else if (item.item_name == "Loan Reduction £100,000") {
+		/* Use command to ensure synchronized loan reduction. */
 		Money reduce = (Money)100000LL;
-		c->current_loan = (c->current_loan > reduce) ? Money(c->current_loan - reduce) : Money(0);
+		if (reduce > c->current_loan) reduce = c->current_loan;
+		Command<CMD_AP_CHANGE_COMPANY_LOAN>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			-reduce);
 		AP_ShowNews(fmt::format("[AP] Bonus: Loan reduced by {}!", AP_Money(reduce)));
 	} else if (item.item_name == "Reliability Boost (all vehicles, 90 days)") {
 		/* Start a 90-game-day reliability timer (90 days * ~80 ticks/day ≈ 7200 ticks).
 		 * The per-tick handler re-applies max reliability every tick, countering the
-		 * normal reliability_spd_dec decay that CheckVehicleBreakdown applies. */
+		 * normal reliability_spd_dec decay that CheckVehicleBreakdown applies.
+		 * Use command to ensure reliability boost is synchronized. */
 		_ap_reliability_boost_ticks = 7200;
-		for (Vehicle *v : Vehicle::Iterate()) {
-			if (v->owner == cid && v->IsPrimaryVehicle()) {
-				const Engine *e = v->GetEngine();
-				if (e != nullptr) v->reliability = e->reliability_max;
-				v->breakdown_chance = 0;
-			}
-		}
+		Command<CMD_AP_BOOST_VEHICLE_RELIABILITY>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			cid);
 		AP_ShowNews("[AP] Bonus: Reliability Boost! All vehicles at max reliability for 90 days.");
 	} else if (item.item_name == "Cargo Bonus (2x payment, 60 days)") {
 		/* Start a 60-second (240-tick) cargo payment multiplier.
-		 * The hook in DeliverGoods (economy.cpp) doubles profit while this is active. */
-		_ap_cargo_bonus_ticks = 240;
+		 * The hook in DeliverGoods (economy.cpp) doubles profit while this is active.
+		 * Use command to ensure cargo bonus timer is synchronized. */
+		Command<CMD_AP_START_CARGO_BONUS>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			240);
 		AP_ShowNews("[AP] Bonus: Cargo Bonus! All cargo deliveries pay double for 60 seconds!");
 	} else if (item.item_name == "Town Growth Boost") {
 		/* Trigger an immediate growth pulse in every town by resetting
 		 * grow_counter to 0.  The engine will schedule the next growth
 		 * tick immediately.  We deliberately do NOT halve growth_rate —
 		 * that mutation is permanent and, with 8+ copies in the pool,
-		 * would eventually freeze all towns. */
-		for (Town *t : Town::Iterate()) {
-			t->grow_counter = 0;
-		}
+		 * would eventually freeze all towns.
+		 * Use command to ensure all towns grow simultaneously. */
+		Command<CMD_AP_TRIGGER_TOWN_GROWTH>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			0);
 		AP_ShowNews("[AP] Bonus: Town Growth Boost! All towns growing faster.");
 	} else if (item.item_name == "Free Station Upgrade") {
 		/* Boost all player stations to MAX_STATION_RATING (255) for 30 game-days.
+		 * Use single command to ensure all stations are boosted synchronously server-side.
 		 * The per-day timer re-applies the boost so normal decay doesn't reduce it. */
 		_ap_station_boost_ticks = 2400; /* 30 days * ~80 ticks/day */
-		for (Station *st : Station::Iterate()) {
-			if (st->owner != cid) continue;
-			for (CargoType ct = 0; ct < NUM_CARGO; ct++) {
-				if (st->goods[ct].HasRating()) {
-					st->goods[ct].rating = MAX_STATION_RATING;
-				}
-			}
-		}
+		Command<CMD_AP_BOOST_STATION_RATING>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			cid);
 		AP_ShowNews("[AP] Bonus: Free Station Upgrade! All your stations boosted to perfect rating for 30 days!");
 	} else if (item.item_name == "Cash Bonus" || item.item_name == "Extra Funding") {
-		/* Legacy names */
-		AP_ChangeMoney(cid, (Money)100000LL);
+		/* Legacy names - use command for money changes */
+		Command<CMD_AP_CHANGE_COMPANY_MONEY>::Do(
+			DoCommandFlags{DoCommandFlag::Execute},
+			(Money)100000LL);
 		AP_ShowNews(fmt::format("[AP] Bonus: +{}!", AP_Money((Money)100000LL)));
 
 	/* ── Speed Boost (non-idempotent: cumulative +10 per item) ────── */

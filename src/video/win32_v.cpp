@@ -28,9 +28,6 @@
 #include <windows.h>
 #include <imm.h>
 #include <versionhelpers.h>
-#if defined(_MSC_VER) && defined(NTDDI_WIN10_RS4)
-#include <winrt/Windows.UI.ViewManagement.h>
-#endif
 
 #ifdef WITH_OPENGL
 #include <GL/gl.h>
@@ -408,63 +405,23 @@ static void CancelIMEComposition(HWND hwnd)
 	HandleTextInput({}, true);
 }
 
-#if defined(_MSC_VER) && defined(NTDDI_WIN10_RS4)
-/* We only use WinRT functions on Windows 10 or later. Unfortunately, newer Windows SDKs are now
- * linking the two functions below directly instead of using dynamic linking as previously.
- * To avoid any runtime linking errors on Windows 7 or older, we stub in our own dynamic
- * linking trampoline. */
-
-static LibraryLoader _combase("combase.dll");
-
-extern "C" int32_t __stdcall WINRT_IMPL_RoOriginateLanguageException(int32_t error, void *message, void *languageException) noexcept
-{
-	typedef BOOL(WINAPI *PFNRoOriginateLanguageException)(int32_t, void *, void *);
-	static PFNRoOriginateLanguageException RoOriginateLanguageException = _combase.GetFunction("RoOriginateLanguageException");
-
-	if (RoOriginateLanguageException != nullptr) {
-		return RoOriginateLanguageException(error, message, languageException);
-	} else {
-		return TRUE;
-	}
-}
-
-extern "C" int32_t __stdcall WINRT_IMPL_RoGetActivationFactory(void *classId, winrt::guid const &iid, void **factory) noexcept
-{
-	typedef BOOL(WINAPI *PFNRoGetActivationFactory)(void *, winrt::guid const &, void **);
-	static PFNRoGetActivationFactory RoGetActivationFactory = _combase.GetFunction("RoGetActivationFactory");
-
-	if (RoGetActivationFactory != nullptr) {
-		return RoGetActivationFactory(classId, iid, factory);
-	} else {
-		*factory = nullptr;
-		return winrt::impl::error_class_not_available;
-	}
-}
-#endif
-
 static bool IsDarkModeEnabled()
 {
 	/* Only build if SDK is Windows 10 1803 or later. */
 #if defined(_MSC_VER) && defined(NTDDI_WIN10_RS4)
 	if (IsWindows10OrGreater()) {
-		try {
-			/*
-			 * The official documented way to find out if the system is running in dark mode is to
-			 * check the brightness of the current theme's colour.
-			 * See: https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-windows-themes#know-when-dark-mode-is-enabled
-			 *
-			 * There are other variants floating around on the Internet, but they all rely on internal,
-			 * undocumented Windows functions that may or may not work in the future.
-			 */
-			winrt::Windows::UI::ViewManagement::UISettings settings;
-			auto foreground = settings.GetColorValue(winrt::Windows::UI::ViewManagement::UIColorType::Foreground);
+		DWORD apps_use_light_theme = 1;
+		DWORD value_size = sizeof(apps_use_light_theme);
+		LSTATUS status = RegGetValueW(
+			HKEY_CURRENT_USER,
+			TEXT("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+			TEXT("AppsUseLightTheme"),
+			RRF_RT_REG_DWORD,
+			nullptr,
+			&apps_use_light_theme,
+			&value_size);
 
-			/* If the Foreground colour is a light colour, the system is running in dark mode. */
-			return ((5 * foreground.G) + (2 * foreground.R) + foreground.B) > (8 * 128);
-		} catch (...) {
-			/* Some kind of error, like a too old Windows version. Just return false. */
-			return false;
-		}
+		if (status == ERROR_SUCCESS) return apps_use_light_theme == 0;
 	}
 #endif /* defined(_MSC_VER) && defined(NTDDI_WIN10_RS4) */
 
